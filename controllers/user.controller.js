@@ -90,14 +90,16 @@ export const login = catchAsyncErrors(async (req, res, next) => {
   sendToken(user, 200, res, "User logged in successfully");
 });
 
+// user.controller.js
+
 export const logout = catchAsyncErrors(async (req, res, next) => {
   res
     .status(200)
     .cookie("token", "", {
-      expires: new Date(Date.now()),
+      expires: new Date(0),
       httpOnly: true,
-      secure: true, // Ensures cookie is sent only over HTTPS
-      sameSite: "None", // Allows cross-site cookies
+      secure: true, 
+      sameSite: "None",
     })
     .json({
       success: true,
