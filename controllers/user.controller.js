@@ -5,95 +5,88 @@ import { v2 as cloudinary } from "cloudinary";
 import { sendToken } from "../utils/jwtToken.js";
 
 export const register = catchAsyncErrors(async (req, res, next) => {
-  try {
-    const {
-      name,
-      email,
-      phone,
-      address,
-      password,
-      role,
+  const {
+    name,
+    email,
+    phone,
+    address,
+    password,
+    role,
+    firstNiche,
+    secondNiche,
+    thirdNiche,
+    coverLetter,
+  } = req.body;
+
+  if (!name || !email || !phone || !address || !password || !role) {
+    return next(new ErrorHandler("All fields are required", 400));
+  }
+
+  if (role === "Job Seeker" && (!firstNiche || !secondNiche || !thirdNiche)) {
+    return next(new ErrorHandler("Please provide your preferred job niches", 400));
+  }
+
+  const existingUser = await User.findOne({ email });
+  if (existingUser) {
+    return next(new ErrorHandler("Email already exists", 400));
+  }
+
+  const userData = {
+    name,
+    email,
+    phone,
+    address,
+    password,
+    role,
+    niches: {
       firstNiche,
       secondNiche,
       thirdNiche,
-      coverLetter,
-    } = req.body;
+    },
+    coverLetter,
+  };
 
-    if (!name || !email || !phone || !address || !password || !role) {
-      return next(new ErrorHandler("All fields are required", 400));
-    }
-    if (role === "Job Seeker" && (!firstNiche || !secondNiche || !thirdNiche)) {
-      return next(
-        new ErrorHandler("Please provide your preferred job niches", 400)
+  if (req.files && req.files.resume) {
+    const { resume } = req.files;
+    try {
+      const cloudinaryResponse = await cloudinary.uploader.upload(
+        resume.tempFilePath,
+        { folder: "Job_Seeker's_Resume", resource_type: "auto" }
       );
-    }
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return next(new ErrorHandler("Email already exists", 400));
-    }
-    const userData = {
-      name,
-      email,
-      phone,
-      address,
-      password,
-      role,
-      niches: {
-        firstNiche,
-        secondNiche,
-        thirdNiche,
-      },
-      coverLetter,
-    };
-
-    if (req.files && req.files.resume) {
-      const { resume } = req.files;
-      if (resume) {
-        try {
-          const cloudinaryResponse = await cloudinary.uploader.upload(
-            resume.tempFilePath,
-            { folder: "Job_Seeker's_Resume", resource_type: "auto" }
-          );
-
-          if (!cloudinaryResponse || cloudinaryResponse.error) {
-            return next(new ErrorHandler("Failed to upload resume", 500));
-          }
-          userData.resume = {
-            public_id: cloudinaryResponse.public_id,
-            url: cloudinaryResponse.secure_url,
-          };
-        } catch (error) {
-          return next(new ErrorHandler("Failed to upload resume", 500));
-        }
+      if (!cloudinaryResponse || cloudinaryResponse.error) {
+        return next(new ErrorHandler("Failed to upload resume", 500));
       }
+      userData.resume = {
+        public_id: cloudinaryResponse.public_id,
+        url: cloudinaryResponse.secure_url,
+      };
+    } catch (error) {
+      return next(new ErrorHandler("Failed to upload resume", 500));
     }
-    const user = await User.create(userData);
-
-    sendToken(user, 201, res, "User registered successfully");
-  } catch (error) {
-    next(error);
   }
+
+  const user = await User.create(userData);
+  sendToken(user, 201, res, "User registered successfully");
 });
 
 export const login = catchAsyncErrors(async (req, res, next) => {
   const { role, email, password } = req.body;
+
   if (!role || !email || !password) {
-    return next(newErrorHandler("Email, password and role are required", 400));
+    return next(new ErrorHandler("Email, password, and role are required", 400));
   }
+
   const user = await User.findOne({ email }).select("+password");
 
-  if (!user) {
+  if (!user || !(await user.comparePassword(password))) {
     return next(new ErrorHandler("Invalid email or password", 400));
   }
 
-  const isPasswordMatched = await user.comparePassword(password);
-  if (!isPasswordMatched) {
-    return next(new ErrorHandler("Invalid email or password", 400));
-  }
   if (user.role !== role) {
     return next(new ErrorHandler("Invalid role", 400));
   }
+
   sendToken(user, 200, res, "User logged in successfully");
 });
 
@@ -111,8 +104,7 @@ export const logout = catchAsyncErrors(async (req, res, next) => {
 });
 
 export const getUser = catchAsyncErrors(async (req, res, next) => {
-  const user = req.user;
-  res.status(200).json({ success: true, data: user });
+  res.status(200).json({ success: true, data: req.user });
 });
 
 export const updateProfile = catchAsyncErrors(async (req, res, next) => {
@@ -129,24 +121,20 @@ export const updateProfile = catchAsyncErrors(async (req, res, next) => {
     },
   };
 
-  const { firstNiche, secondNiche, thirdNiche } = newUserData.niches;
-
   if (
     req.user.role === "Job Seeker" &&
-    (!firstNiche || !secondNiche || !thirdNiche)
+    (!newUserData.niches.firstNiche || !newUserData.niches.secondNiche || !newUserData.niches.thirdNiche)
   ) {
-    return next(
-      new ErrorHandler("Please provide your preferred job niches", 400)
-    );
+    return next(new ErrorHandler("Please provide your preferred job niches", 400));
   }
 
-  if (req.files) {
+  if (req.files && req.files.resume) {
     const resume = req.files.resume;
-    if (resume) {
-      const currResumeId = req.user.resume.public_id;
-      if (currResumeId) {
-        await cloudinary.uploader.destroy(currResumeId);
-      }
+    const currResumeId = req.user.resume?.public_id;
+    if (currResumeId) {
+      await cloudinary.uploader.destroy(currResumeId);
+    }
+    try {
       const newResume = await cloudinary.uploader.upload(resume.tempFilePath, {
         folder: "Job_Seeker's_Resume",
         resource_type: "auto",
@@ -155,38 +143,38 @@ export const updateProfile = catchAsyncErrors(async (req, res, next) => {
         public_id: newResume.public_id,
         url: newResume.secure_url,
       };
+    } catch (error) {
+      return next(new ErrorHandler("Failed to upload new resume", 500));
     }
   }
 
   const user = await User.findByIdAndUpdate(req.user.id, newUserData, {
     new: true,
     runValidators: true,
-    useFindAndModify: false,
   });
-  res
-    .status(200)
-    .json({
-      success: true,
-      user,
-      message: "Profile updated successfully",
-    });
+
+  res.status(200).json({
+    success: true,
+    user,
+    message: "Profile updated successfully",
+  });
 });
 
-export const updatePassword = catchAsyncErrors(async(req, res, next) => {
-    const user = await User.findById(req.user.id).select("+password");
+export const updatePassword = catchAsyncErrors(async (req, res, next) => {
+  const user = await User.findById(req.user.id).select("+password");
 
-    const isPasswordMatched = await user.comparePassword(req.body.oldPassword);
+  const isPasswordMatched = await user.comparePassword(req.body.oldPassword);
 
-    if(!isPasswordMatched){
-        return next(new ErrorHandler("Invalid old password", 400));
-    }
+  if (!isPasswordMatched) {
+    return next(new ErrorHandler("Invalid old password", 400));
+  }
 
-    if(req.body.newPassword !== req.body.confirmPassword){
-        return next(new ErrorHandler("Passwords do not match", 400));
-    }
+  if (req.body.newPassword !== req.body.confirmPassword) {
+    return next(new ErrorHandler("Passwords do not match", 400));
+  }
 
-    user.password = req.body.newPassword;
-    await user.save();
+  user.password = req.body.newPassword;
+  await user.save();
 
-    sendToken(user, 200, res, "Password updated successfully");
+  sendToken(user, 200, res, "Password updated successfully");
 });
