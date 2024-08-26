@@ -93,13 +93,15 @@ export const login = catchAsyncErrors(async (req, res, next) => {
 // user.controller.js
 
 export const logout = catchAsyncErrors(async (req, res, next) => {
+  console.log('Cookies:', req.cookies);
   res
     .status(200)
     .cookie("token", "", {
       expires: new Date(0),
       httpOnly: true,
-      secure: true, 
-      sameSite: "None",
+      secure: true, // Always use secure in production
+      sameSite: 'None', // Important for cross-domain
+      path: '/', // Ensure the cookie is accessible for all paths
     })
     .json({
       success: true,
